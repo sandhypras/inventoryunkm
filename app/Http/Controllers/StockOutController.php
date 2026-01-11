@@ -42,7 +42,12 @@ class StockOutController extends Controller
             ->orderBy('name')
             ->get(['id', 'code', 'name', 'selling_price', 'stock', 'unit']);
 
-        return view('stock-outs.create', compact('products'));
+        // Generate preview code
+        $lastStockOut = StockOut::whereDate('created_at', today())->latest()->first();
+        $number = $lastStockOut ? intval(substr($lastStockOut->code, -4)) + 1 : 1;
+        $code = 'SO-' . date('Ymd') . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+
+        return view('stock-outs.create', compact('products', 'code'));
     }
 
     public function store(Request $request)

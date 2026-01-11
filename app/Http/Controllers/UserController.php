@@ -11,7 +11,7 @@ class UserController extends Controller
 {
     public function index()
     {
-        $this->authorize('view_users');
+        abort_unless(auth()->user()->can('view_users'), 403);
 
         $users = User::with('roles')->latest()->paginate(15);
 
@@ -20,7 +20,7 @@ class UserController extends Controller
 
     public function create()
     {
-        $this->authorize('create_users');
+        abort_unless(auth()->user()->can('create_users'), 403);
 
         $roles = Role::all();
 
@@ -29,7 +29,7 @@ class UserController extends Controller
 
     public function store(Request $request)
     {
-        $this->authorize('create_users');
+        abort_unless(auth()->user()->can('create_users'), 403);
 
         $request->validate([
             'name' => 'required|string|max:255',
@@ -57,7 +57,7 @@ class UserController extends Controller
 
     public function show(User $user)
     {
-        $this->authorize('view_users');
+        abort_unless(auth()->user()->can('view_users'), 403);
 
         $user->load('roles', 'permissions');
 
@@ -66,7 +66,7 @@ class UserController extends Controller
 
     public function edit(User $user)
     {
-        $this->authorize('edit_users');
+        abort_unless(auth()->user()->can('edit_users'), 403);
 
         $roles = Role::all();
 
@@ -75,7 +75,7 @@ class UserController extends Controller
 
     public function update(Request $request, User $user)
     {
-        $this->authorize('edit_users');
+        abort_unless(auth()->user()->can('edit_users'), 403);
 
         $request->validate([
             'name' => 'required|string|max:255',
@@ -107,7 +107,7 @@ class UserController extends Controller
 
     public function destroy(User $user)
     {
-        $this->authorize('delete_users');
+        abort_unless(auth()->user()->can('delete_users'), 403);
 
         // Prevent deleting own account
         if ($user->id === auth()->id()) {
@@ -123,7 +123,7 @@ class UserController extends Controller
 
     public function toggleStatus(User $user)
     {
-        $this->authorize('edit_users');
+        abort_unless(auth()->user()->can('edit_users'), 403);
 
         $user->update([
             'email_verified_at' => $user->email_verified_at ? null : now()

@@ -47,7 +47,12 @@ class StockInController extends Controller
 
         $suppliers = Supplier::orderBy('name')->get();
 
-        return view('stock-ins.create', compact('products', 'suppliers'));
+        // Generate preview code
+        $lastStockIn = StockIn::whereDate('created_at', today())->latest()->first();
+        $number = $lastStockIn ? intval(substr($lastStockIn->code, -4)) + 1 : 1;
+        $code = 'SI-' . date('Ymd') . '-' . str_pad($number, 4, '0', STR_PAD_LEFT);
+
+        return view('stock-ins.create', compact('products', 'suppliers', 'code'));
     }
 
     public function store(Request $request)

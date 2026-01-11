@@ -8,6 +8,7 @@ use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\StockInController;
 use App\Http\Controllers\StockOutController;
 use App\Http\Controllers\ReportController;
+use App\Http\Controllers\UserController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
@@ -15,48 +16,69 @@ Route::get('/', function () {
 });
 
 Route::middleware(['auth', 'verified'])->group(function () {
-    // Dashboard
+    // Dashboard - All roles
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
 
-    // Products
+    // Products - All roles can view, but only admin & gudang can manage
     Route::resource('products', ProductController::class);
 
-    // Categories
-    Route::resource('categories', CategoryController::class);
+    // Categories - Admin & Gudang only
+    Route::middleware(['role:admin,gudang'])->group(function () {
+        Route::resource('categories', CategoryController::class);
+    });
 
-    // Suppliers
-    Route::resource('suppliers', SupplierController::class);
+    // Suppliers - Admin & Gudang only
+    Route::middleware(['role:admin,gudang'])->group(function () {
+        Route::resource('suppliers', SupplierController::class);
+    });
 
-    // Stock In (Barang Masuk)
-    Route::resource('stock-ins', StockInController::class);
+    // Stock In (Barang Masuk) - Admin & Gudang only
+    Route::middleware(['role:admin,gudang'])->group(function () {
+        Route::resource('stock-ins', StockInController::class);
+    });
 
-    // Stock Out (Barang Keluar/Penjualan)
-    Route::resource('stock-outs', StockOutController::class);
+    // Stock Out (Barang Keluar/Penjualan) - All except Viewer
+    Route::middleware(['role:admin,gudang,kasir'])->group(function () {
+        Route::resource('stock-outs', StockOutController::class);
+    });
 
-    // Reports
+    // Reports - All roles
     Route::prefix('reports')->name('reports.')->group(function () {
-        // Main Reports Page
         Route::get('/', [ReportController::class, 'index'])->name('index');
 
         // Stock Reports
         Route::get('/stock', [ReportController::class, 'stock'])->name('stock');
         Route::get('/stock/pdf', [ReportController::class, 'stockPdf'])->name('stock.pdf');
-        Route::post('/stock/email', [ReportController::class, 'emailStock'])->name('stock.email');
+
+        // Email report - Admin only
+        Route::middleware(['role:admin'])->group(function () {
+            Route::post('/stock/email', [ReportController::class, 'emailStock'])->name('stock.email');
+            Route::post('/sales/email', [ReportController::class, 'emailSales'])->name('sales.email');
+            Route::post('/purchases/email', [ReportController::class, 'emailPurchases'])->name('purchases.email');
+            Route::post('/profit/email', [ReportController::class, 'emailProfit'])->name('profit.email');
+        });
 
         // Sales Reports
         Route::get('/sales', [ReportController::class, 'sales'])->name('sales');
         Route::get('/sales/pdf', [ReportController::class, 'salesPdf'])->name('sales.pdf');
-        Route::post('/sales/email', [ReportController::class, 'emailSales'])->name('sales.email');
 
-        // Purchases Reports
-        Route::get('/purchases', [ReportController::class, 'purchases'])->name('purchases');
-        Route::get('/purchases/pdf', [ReportController::class, 'purchasesPdf'])->name('purchases.pdf');
-        Route::post('/purchases/email', [ReportController::class, 'emailPurchases'])->name('purchases.email');
+        // Purchases Reports - Admin & Gudang only
+        Route::middleware(['role:admin,gudang,viewer'])->group(function () {
+            Route::get('/purchases', [ReportController::class, 'purchases'])->name('purchases');
+            Route::get('/purchases/pdf', [ReportController::class, 'purchasesPdf'])->name('purchases.pdf');
+        });
 
-        // Profit Reports
-        Route::get('/profit', [ReportController::class, 'profit'])->name('profit');
-        Route::get('/profit/pdf', [ReportController::class, 'profitPdf'])->name('profit.pdf');
-        Route::post('/profit/email', [ReportController::class, 'emailProfit'])->name('profit.email');
+        // Profit Reports - Admin & Viewer only
+        Route::middleware(['role:admin,viewer'])->group(function () {
+            Route::get('/profit', [ReportController::class, 'profit'])->name('profit');
+            Route::get('/profit/pdf', [ReportController::class, 'profitPdf'])->name('profit.pdf');
+        });
+    });
+
+    // User Management - Admin only
+    Route::middleware(['role:admin'])->group(function () {
+        Route::resource('users', UserController::class);
+        Route::post('/users/{user}/toggle-status', [UserController::class, 'toggleStatus'])->name('users.toggle-status');
     });
 });
 

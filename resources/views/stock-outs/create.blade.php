@@ -38,7 +38,7 @@
                             <!-- Kode Transaksi (Auto) -->
                             <div>
                                 <label for="code" class="block text-sm font-medium text-gray-700">Kode Transaksi</label>
-                                <input type="text" name="code" id="code" value="{{ old('code', 'SO-' . date('Ymd') . '-' . str_pad(1, 4, '0', STR_PAD_LEFT)) }}" required readonly
+                                <input type="text" name="code" id="code" value="{{ old('code', $code) }}" required readonly
                                     class="mt-1 block w-full rounded-md border-gray-300 bg-gray-100 shadow-sm">
                                 <p class="mt-1 text-xs text-gray-500">Otomatis di-generate</p>
                             </div>
@@ -216,16 +216,20 @@
         // Validate stock before submit
         document.getElementById('stockOutForm').addEventListener('submit', function(e) {
             let valid = true;
+            const selects = document.querySelectorAll('select[name^="items"]');
 
-            document.querySelectorAll('select[name^="items"]').forEach((select, idx) => {
+            selects.forEach((select, idx) => {
+                if (!select.value) return; // Skip empty selects
+
                 const option = select.options[select.selectedIndex];
                 const stock = parseFloat(option.dataset.stock) || 0;
-                const qty = parseFloat(document.querySelector(`input[name="items[${idx}][quantity]"]`).value) || 0;
+                const qtyInput = document.querySelector(`input[name="items[${idx}][quantity]"]`);
+                const qty = parseFloat(qtyInput.value) || 0;
 
                 if (qty > stock) {
-                    alert(`Stok ${option.text} tidak mencukupi! Stok tersedia: ${stock}`);
+                    alert(`Stok ${option.text.split(' - ')[1]} tidak mencukupi! Stok tersedia: ${stock}`);
                     valid = false;
-                    e.preventDefault();
+                    qtyInput.focus();
                     return false;
                 }
             });

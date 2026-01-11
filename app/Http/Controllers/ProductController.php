@@ -14,78 +14,60 @@ class ProductController extends Controller
     {
         $query = Product::with(['category', 'supplier']);
 
-        // Filter by search
         if ($request->search) {
-            $query->where(function($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
+            $query->where('name', 'like', '%' . $request->search . '%')
                   ->orWhere('code', 'like', '%' . $request->search . '%');
-            });
         }
 
-        // Filter by category
-        if ($request->category_id) {
-            $query->where('category_id', $request->category_id);
+        if ($request->category) {
+            $query->where('category_id', $request->category);
         }
 
-        // Filter by supplier
-        if ($request->supplier_id) {
-            $query->where('supplier_id', $request->supplier_id);
-        }
-
-        // Filter by status
         if ($request->status) {
             $query->where('status', $request->status);
         }
 
-        // Filter low stock
         if ($request->low_stock) {
-            $query->whereColumn('stock', '<=', 'min_stock');
+            $query->whereRaw('stock <= min_stock');
         }
 
-        $products = $query->latest()->paginate(12);
-        $categories = Category::orderBy('name')->get();
-        $suppliers = Supplier::orderBy('name')->get();
+        $products = $query->latest()->paginate(10);
+        $categories = Category::all();
 
-        return view('products.index', compact('products', 'categories', 'suppliers'));
+        return view('products.index', compact('products', 'categories'));
     }
 
     public function create()
     {
-        $categories = Category::orderBy('name')->get();
-        $suppliers = Supplier::orderBy('name')->get();
-
-        // Generate next product code
-        $lastProduct = Product::latest()->first();
-        $nextNumber = $lastProduct ? intval(substr($lastProduct->code, 4)) + 1 : 1;
-        $code = 'PRD-' . str_pad($nextNumber, 5, '0', STR_PAD_LEFT);
+        $categories = Category::all();
+        $suppliers = Supplier::all();
+        $code = $this->generateProductCode();
 
         return view('products.create', compact('categories', 'suppliers', 'code'));
     }
 
     public function store(Request $request)
     {
-        $request->validate([
-            'code' => 'required|unique:products,code',
-            'name' => 'required|max:255',
+        $validated = $request->validate([
+            'code' => 'required|unique:products',
+            'name' => 'required',
             'category_id' => 'required|exists:categories,id',
             'supplier_id' => 'required|exists:suppliers,id',
             'purchase_price' => 'required|numeric|min:0',
             'selling_price' => 'required|numeric|min:0',
-            'min_stock' => 'required|numeric|min:0',
+            'stock' => 'required|integer|min:0',
+            'min_stock' => 'required|integer|min:0',
             'unit' => 'required',
-            'status' => 'required|in:active,inactive',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'image' => 'nullable|image|max:2048',
+            'description' => 'nullable',
+            'status' => 'required|in:active,inactive'
         ]);
 
-        $data = $request->except('image');
-        $data['stock'] = $data['stock'] ?? 0;
-
-        // Handle image upload
         if ($request->hasFile('image')) {
-            $data['image'] = $request->file('image')->store('products', 'public');
+            $validated['image'] = $request->file('image')->store('products', 'public');
         }
 
-        Product::create($data);
+        Product::create($validated);
 
         return redirect()->route('products.index')
             ->with('success', 'Produk berhasil ditambahkan!');
@@ -93,46 +75,42 @@ class ProductController extends Controller
 
     public function show(Product $product)
     {
-        $product->load(['category', 'supplier']);
-
+        $product->load(['category', 'supplier', 'stockInItems.stockIn', 'stockOutItems.stockOut']);
         return view('products.show', compact('product'));
     }
 
     public function edit(Product $product)
     {
-        $categories = Category::orderBy('name')->get();
-        $suppliers = Supplier::orderBy('name')->get();
-
+        $categories = Category::all();
+        $suppliers = Supplier::all();
         return view('products.edit', compact('product', 'categories', 'suppliers'));
     }
 
     public function update(Request $request, Product $product)
     {
-        $request->validate([
+        $validated = $request->validate([
             'code' => 'required|unique:products,code,' . $product->id,
-            'name' => 'required|max:255',
+            'name' => 'required',
             'category_id' => 'required|exists:categories,id',
             'supplier_id' => 'required|exists:suppliers,id',
             'purchase_price' => 'required|numeric|min:0',
             'selling_price' => 'required|numeric|min:0',
-            'min_stock' => 'required|numeric|min:0',
+            'stock' => 'required|integer|min:0',
+            'min_stock' => 'required|integer|min:0',
             'unit' => 'required',
-            'status' => 'required|in:active,inactive',
-            'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048',
+            'image' => 'nullable|image|max:2048',
+            'description' => 'nullable',
+            'status' => 'required|in:active,inactive'
         ]);
 
-        $data = $request->except('image', 'stock');
-
-        // Handle image upload
         if ($request->hasFile('image')) {
-            // Delete old image
             if ($product->image) {
                 Storage::disk('public')->delete($product->image);
             }
-            $data['image'] = $request->file('image')->store('products', 'public');
+            $validated['image'] = $request->file('image')->store('products', 'public');
         }
 
-        $product->update($data);
+        $product->update($validated);
 
         return redirect()->route('products.index')
             ->with('success', 'Produk berhasil diupdate!');
@@ -140,7 +118,6 @@ class ProductController extends Controller
 
     public function destroy(Product $product)
     {
-        // Delete image
         if ($product->image) {
             Storage::disk('public')->delete($product->image);
         }
@@ -149,5 +126,12 @@ class ProductController extends Controller
 
         return redirect()->route('products.index')
             ->with('success', 'Produk berhasil dihapus!');
+    }
+
+    private function generateProductCode()
+    {
+        $lastProduct = Product::latest('id')->first();
+        $number = $lastProduct ? intval(substr($lastProduct->code, 4)) + 1 : 1;
+        return 'PRD-' . str_pad($number, 5, '0', STR_PAD_LEFT);
     }
 }

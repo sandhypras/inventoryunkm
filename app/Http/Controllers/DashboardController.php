@@ -3,10 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Product;
-use App\Models\StockIn;
 use App\Models\StockOut;
 use App\Models\Category;
-use App\Models\Supplier;
 use Illuminate\Support\Facades\DB;
 use Carbon\Carbon;
 
@@ -14,80 +12,78 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        // Total data
+        // Summary Statistics
         $totalProducts = Product::count();
-        $totalCategories = Category::count();
-        $totalSuppliers = Supplier::count();
+        $lowStockCount = Product::whereRaw('stock <= min_stock')->count();
 
-        // Low stock products
-        $lowStockProducts = Product::whereRaw('stock <= min_stock')->count();
+        // Today's Sales
+        $todaySales = StockOut::whereDate('date', today())->sum('total');
 
-        // Total stock value
-        $totalStockValue = Product::sum(DB::raw('stock * purchase_price'));
-
-        // Revenue this month
-        $monthlyRevenue = StockOut::whereMonth('date', Carbon::now()->month)
-            ->whereYear('date', Carbon::now()->year)
+        // Monthly Sales
+        $monthlySales = StockOut::whereMonth('date', now()->month)
+            ->whereYear('date', now()->year)
             ->sum('total');
 
-        // Purchases this month
-        $monthlyPurchases = StockIn::whereMonth('date', Carbon::now()->month)
-            ->whereYear('date', Carbon::now()->year)
-            ->sum('total');
-
-        // Recent transactions
-        $recentStockIns = StockIn::with('supplier')
-            ->latest()
-            ->take(5)
-            ->get();
-
-        $recentStockOuts = StockOut::latest()
-            ->take(5)
-            ->get();
-
-        // Low stock products list
-        $lowStockProductsList = Product::with(['category', 'supplier'])
+        // Low Stock Products (Top 10)
+        $lowStockProducts = Product::with('category')
             ->whereRaw('stock <= min_stock')
             ->orderBy('stock', 'asc')
-            ->take(10)
+            ->limit(10)
             ->get();
 
-        // Top selling products (based on stock out)
-        $topProducts = Product::withCount(['stockOutItems as total_sold' => function($query) {
-                $query->select(DB::raw('sum(quantity)'));
-            }])
-            ->orderBy('total_sold', 'desc')
-            ->take(5)
+        // Recent Transactions (Last 10)
+        $recentTransactions = StockOut::with('user')
+            ->latest('date')
+            ->latest('created_at')
+            ->limit(10)
             ->get();
 
-        // Monthly chart data
-        $monthlyData = [];
-        for ($i = 5; $i >= 0; $i--) {
-            $date = Carbon::now()->subMonths($i);
-            $monthlyData[] = [
-                'month' => $date->format('M Y'),
-                'income' => StockOut::whereMonth('date', $date->month)
-                    ->whereYear('date', $date->year)
-                    ->sum('total'),
-                'expense' => StockIn::whereMonth('date', $date->month)
-                    ->whereYear('date', $date->year)
-                    ->sum('total'),
-            ];
+        // Sales Chart Data (Last 7 days)
+        $salesDates = [];
+        $salesAmounts = [];
+
+        for ($i = 6; $i >= 0; $i--) {
+            $date = now()->subDays($i);
+            $salesDates[] = $date->format('d M');
+
+            $amount = StockOut::whereDate('date', $date->format('Y-m-d'))->sum('total');
+            $salesAmounts[] = $amount;
         }
+
+        // Category Sales Data (This Month)
+        $categorySalesData = DB::table('stock_out_items')
+            ->join('stock_outs', 'stock_out_items.stock_out_id', '=', 'stock_outs.id')
+            ->join('products', 'stock_out_items.product_id', '=', 'products.id')
+            ->join('categories', 'products.category_id', '=', 'categories.id')
+            ->whereMonth('stock_outs.date', now()->month)
+            ->whereYear('stock_outs.date', now()->year)
+            ->select(
+                'categories.name',
+                'categories.icon',
+                DB::raw('SUM(stock_out_items.subtotal) as total_sales')
+            )
+            ->groupBy('categories.id', 'categories.name', 'categories.icon')
+            ->orderByDesc('total_sales')
+            ->limit(6)
+            ->get();
+
+        $categoryNames = $categorySalesData->map(function($item) {
+            return $item->icon . ' ' . $item->name;
+        })->toArray();
+
+        $categorySales = $categorySalesData->pluck('total_sales')->toArray();
 
         return view('dashboard', compact(
             'totalProducts',
-            'totalCategories',
-            'totalSuppliers',
+            'lowStockCount',
+            'todaySales',
+            'monthlySales',
             'lowStockProducts',
-            'totalStockValue',
-            'monthlyRevenue',
-            'monthlyPurchases',
-            'recentStockIns',
-            'recentStockOuts',
-            'lowStockProductsList',
-            'topProducts',
-            'monthlyData'
+            'recentTransactions',
+            'salesDates',
+            'salesAmounts',
+            'categoryNames',
+            'categorySales'
         ));
     }
 }
