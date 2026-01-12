@@ -6,266 +6,646 @@ use App\Models\Product;
 use App\Models\StockIn;
 use App\Models\StockOut;
 use App\Models\Category;
-use App\Models\Supplier;
+use App\Models\Setting;
+use App\Mail\ReportMail;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Barryvdh\DomPDF\Facade\Pdf;
 
 class ReportController extends Controller
 {
     public function index()
     {
-        return view('reports.index');
+        $summary = [
+            'total_products' => Product::count(),
+            'low_stock' => Product::where('stock', '<=', DB::raw('min_stock'))->count(),
+            'total_stock_value' => Product::sum(DB::raw('stock * purchase_price')),
+            'total_sales' => StockOut::sum('total'),
+            'total_purchases' => StockIn::sum('total'),
+        ];
+
+        return view('reports.index', compact('summary'));
     }
 
     public function stock(Request $request)
     {
         $query = Product::with(['category', 'supplier']);
 
-        // Filter by category
-        if ($request->category_id) {
-            $query->where('category_id', $request->category_id);
+        // Filter
+        if ($request->filled('category')) {
+            $query->where('category_id', $request->category);
         }
 
-        // Filter by supplier
-        if ($request->supplier_id) {
-            $query->where('supplier_id', $request->supplier_id);
-        }
-
-        // Filter by stock status
-        if ($request->stock_status) {
-            if ($request->stock_status == 'low') {
-                $query->whereRaw('stock <= min_stock');
-            } elseif ($request->stock_status == 'out') {
+        if ($request->filled('status')) {
+            if ($request->status === 'low') {
+                $query->where('stock', '<=', DB::raw('min_stock'));
+            } elseif ($request->status === 'out') {
                 $query->where('stock', 0);
-            } elseif ($request->stock_status == 'available') {
-                $query->whereRaw('stock > min_stock');
             }
         }
 
-        // Search
-        if ($request->search) {
-            $query->where(function($q) use ($request) {
+        if ($request->filled('search')) {
+            $query->where(function ($q) use ($request) {
+                $q->where('name', 'like', '%' . $request->search . '%')
+                  ->orWhere('code', 'like', '%' . $request->search . '%');
+            });
+        }
+
+        $products = $query->orderBy('name')->paginate(50);
+        $categories = Category::all();
+
+        return view('reports.stock', compact('products', 'categories'));
+    }
+
+    public function stockPdf(Request $request)
+    {
+        $query = Product::with(['category', 'supplier']);
+
+        // Apply same filters as stock method
+        if ($request->filled('category')) {
+            $query->where('category_id', $request->category);
+        }
+
+        if ($request->filled('status')) {
+            if ($request->status === 'low') {
+                $query->where('stock', '<=', DB::raw('min_stock'));
+            } elseif ($request->status === 'out') {
+                $query->where('stock', 0);
+            }
+        }
+
+        if ($request->filled('search')) {
+            $query->where(function ($q) use ($request) {
                 $q->where('name', 'like', '%' . $request->search . '%')
                   ->orWhere('code', 'like', '%' . $request->search . '%');
             });
         }
 
         $products = $query->orderBy('name')->get();
-        $categories = Category::orderBy('name')->get();
-        $suppliers = Supplier::orderBy('name')->get();
 
-        // Summary
-        $summary = [
-            'total_products' => Product::count(),
-            'low_stock' => Product::whereRaw('stock <= min_stock')->count(),
-            'out_of_stock' => Product::where('stock', 0)->count(),
-            'total_stock_value' => Product::sum(DB::raw('stock * purchase_price')),
-            'total_potential_value' => Product::sum(DB::raw('stock * selling_price')),
+        $data = [
+            'products' => $products,
+            'title' => 'Laporan Stok Barang',
+            'date' => date('d F Y'),
+            'total_items' => $products->count(),
+            'total_value' => $products->sum(function ($p) {
+                return $p->stock * $p->purchase_price;
+            }),
         ];
 
-        return view('reports.stock', compact('products', 'categories', 'suppliers', 'summary'));
+        $pdf = Pdf::loadView('reports.pdf.stock', $data)
+            ->setPaper('a4', 'landscape');
+
+        return $pdf->download('laporan-stok-' . date('Y-m-d') . '.pdf');
+    }
+
+    public function emailStock(Request $request)
+    {
+        $request->validate([
+            'owner_email' => 'required|email',
+        ]);
+
+        try {
+            // Get products data
+            $query = Product::with(['category', 'supplier']);
+
+            if ($request->filled('category')) {
+                $query->where('category_id', $request->category);
+            }
+
+            if ($request->filled('status')) {
+                if ($request->status === 'low') {
+                    $query->where('stock', '<=', DB::raw('min_stock'));
+                } elseif ($request->status === 'out') {
+                    $query->where('stock', 0);
+                }
+            }
+
+            $products = $query->orderBy('name')->get();
+
+            // Generate PDF
+            $data = [
+                'products' => $products,
+                'title' => 'Laporan Stok Barang',
+                'date' => date('d F Y'),
+                'total_items' => $products->count(),
+                'total_value' => $products->sum(function ($p) {
+                    return $p->stock * $p->purchase_price;
+                }),
+            ];
+
+            $pdf = Pdf::loadView('reports.pdf.stock', $data)
+                ->setPaper('a4', 'landscape');
+
+            // Save temporary PDF
+            $filename = 'laporan-stok-' . date('Y-m-d-His') . '.pdf';
+            $path = storage_path('app/temp/' . $filename);
+
+            // Create temp directory if not exists
+            if (!file_exists(storage_path('app/temp'))) {
+                mkdir(storage_path('app/temp'), 0755, true);
+            }
+
+            $pdf->save($path);
+
+            // Prepare email data
+            $reportData = [
+                'title' => 'Laporan Stok Barang',
+                'type_label' => 'Laporan Stok',
+                'owner_name' => Setting::get('owner_name', 'Owner'),
+                'total_items' => $products->count(),
+                'grand_total' => 'Rp ' . number_format($data['total_value'], 0, ',', '.'),
+            ];
+
+            // Send email
+            Mail::to($request->owner_email)
+                ->send(new ReportMail('stock', $reportData, $path));
+
+            // Delete temporary file
+            if (file_exists($path)) {
+                unlink($path);
+            }
+
+            return redirect()->back()->with('success', 'Laporan berhasil dikirim ke ' . $request->owner_email);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal mengirim email: ' . $e->getMessage());
+        }
     }
 
     public function sales(Request $request)
     {
-        $dateFrom = $request->date_from ?: now()->startOfMonth()->format('Y-m-d');
-        $dateTo = $request->date_to ?: now()->format('Y-m-d');
+        $query = StockOut::with(['items.product']);
 
-        $query = StockOut::with(['items.product', 'user'])
-            ->whereBetween('date', [$dateFrom, $dateTo]);
-
-        // Search
-        if ($request->search) {
-            $query->where(function($q) use ($request) {
-                $q->where('code', 'like', '%' . $request->search . '%')
-                  ->orWhere('customer_name', 'like', '%' . $request->search . '%');
-            });
+        // Date filter
+        if ($request->filled('start_date')) {
+            $query->whereDate('date', '>=', $request->start_date);
         }
 
-        $stockOuts = $query->latest('date')->get();
-
-        // Calculate totals
-        $totalSales = $stockOuts->sum('total');
-        $totalTransactions = $stockOuts->count();
-
-        // Calculate profit
-        $totalProfit = 0;
-        $totalModal = 0;
-
-        foreach ($stockOuts as $stockOut) {
-            foreach ($stockOut->items as $item) {
-                $modal = $item->quantity * $item->product->purchase_price;
-                $totalModal += $modal;
-            }
+        if ($request->filled('end_date')) {
+            $query->whereDate('date', '<=', $request->end_date);
         }
 
-        $totalProfit = $totalSales - $totalModal;
-
-        // Best selling products
-        $bestSelling = DB::table('stock_out_items')
-            ->join('products', 'stock_out_items.product_id', '=', 'products.id')
-            ->join('stock_outs', 'stock_out_items.stock_out_id', '=', 'stock_outs.id')
-            ->whereBetween('stock_outs.date', [$dateFrom, $dateTo])
-            ->select(
-                'products.name',
-                'products.code',
-                DB::raw('SUM(stock_out_items.quantity) as total_qty'),
-                DB::raw('SUM(stock_out_items.subtotal) as total_amount')
-            )
-            ->groupBy('products.id', 'products.name', 'products.code')
-            ->orderByDesc('total_qty')
-            ->limit(10)
-            ->get();
+        $transactions = $query->orderBy('date', 'desc')->paginate(20);
 
         $summary = [
-            'total_sales' => $totalSales,
-            'total_transactions' => $totalTransactions,
-            'total_modal' => $totalModal,
-            'total_profit' => $totalProfit,
-            'avg_transaction' => $totalTransactions > 0 ? $totalSales / $totalTransactions : 0,
+            'total_transactions' => $query->count(),
+            'total_sales' => $query->sum('total'),
+            'total_items' => $transactions->sum(function ($t) {
+                return $t->items->sum('quantity');
+            }),
         ];
 
-        return view('reports.sales', compact('stockOuts', 'summary', 'bestSelling', 'dateFrom', 'dateTo'));
+        return view('reports.sales', compact('transactions', 'summary'));
+    }
+
+    public function salesPdf(Request $request)
+    {
+        $query = StockOut::with(['items.product']);
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('date', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('date', '<=', $request->end_date);
+        }
+
+        $transactions = $query->orderBy('date', 'desc')->get();
+
+        $data = [
+            'transactions' => $transactions,
+            'title' => 'Laporan Penjualan',
+            'date' => date('d F Y'),
+            'date_range' => ($request->start_date && $request->end_date)
+                ? date('d M Y', strtotime($request->start_date)) . ' - ' . date('d M Y', strtotime($request->end_date))
+                : 'Semua',
+            'total_sales' => $transactions->sum('total'),
+        ];
+
+        $pdf = Pdf::loadView('reports.pdf.sales', $data);
+
+        return $pdf->download('laporan-penjualan-' . date('Y-m-d') . '.pdf');
+    }
+
+    public function emailSales(Request $request)
+    {
+        $request->validate([
+            'owner_email' => 'required|email',
+        ]);
+
+        try {
+            $query = StockOut::with(['items.product']);
+
+            if ($request->filled('start_date')) {
+                $query->whereDate('date', '>=', $request->start_date);
+            }
+
+            if ($request->filled('end_date')) {
+                $query->whereDate('date', '<=', $request->end_date);
+            }
+
+            $transactions = $query->orderBy('date', 'desc')->get();
+
+            $dateRange = ($request->start_date && $request->end_date)
+                ? date('d M Y', strtotime($request->start_date)) . ' - ' . date('d M Y', strtotime($request->end_date))
+                : 'Semua Periode';
+
+            $data = [
+                'transactions' => $transactions,
+                'title' => 'Laporan Penjualan',
+                'date' => date('d F Y'),
+                'date_range' => $dateRange,
+                'total_sales' => $transactions->sum('total'),
+            ];
+
+            $pdf = Pdf::loadView('reports.pdf.sales', $data);
+
+            $filename = 'laporan-penjualan-' . date('Y-m-d-His') . '.pdf';
+            $path = storage_path('app/temp/' . $filename);
+
+            if (!file_exists(storage_path('app/temp'))) {
+                mkdir(storage_path('app/temp'), 0755, true);
+            }
+
+            $pdf->save($path);
+
+            $reportData = [
+                'title' => 'Laporan Penjualan',
+                'type_label' => 'Laporan Penjualan',
+                'owner_name' => Setting::get('owner_name', 'Owner'),
+                'date_range' => $dateRange,
+                'total_items' => $transactions->count() . ' transaksi',
+                'grand_total' => 'Rp ' . number_format($data['total_sales'], 0, ',', '.'),
+            ];
+
+            Mail::to($request->owner_email)
+                ->send(new ReportMail('sales', $reportData, $path, $dateRange));
+
+            if (file_exists($path)) {
+                unlink($path);
+            }
+
+            return redirect()->back()->with('success', 'Laporan penjualan berhasil dikirim ke ' . $request->owner_email);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal mengirim email: ' . $e->getMessage());
+        }
     }
 
     public function purchases(Request $request)
     {
-        $dateFrom = $request->date_from ?: now()->startOfMonth()->format('Y-m-d');
-        $dateTo = $request->date_to ?: now()->format('Y-m-d');
+        $query = StockIn::with(['supplier', 'items.product']);
 
-        $query = StockIn::with(['supplier', 'items.product', 'user'])
-            ->whereBetween('date', [$dateFrom, $dateTo]);
-
-        // Filter by supplier
-        if ($request->supplier_id) {
-            $query->where('supplier_id', $request->supplier_id);
+        // Date filter
+        if ($request->filled('start_date')) {
+            $query->whereDate('date', '>=', $request->start_date);
         }
 
-        // Search
-        if ($request->search) {
-            $query->where('code', 'like', '%' . $request->search . '%');
+        if ($request->filled('end_date')) {
+            $query->whereDate('date', '<=', $request->end_date);
         }
 
-        $stockIns = $query->latest('date')->get();
-        $suppliers = Supplier::orderBy('name')->get();
+        // Supplier filter
+        if ($request->filled('supplier')) {
+            $query->where('supplier_id', $request->supplier);
+        }
 
-        // Calculate totals
-        $totalPurchases = $stockIns->sum('total');
-        $totalTransactions = $stockIns->count();
-
-        // Most purchased products
-        $mostPurchased = DB::table('stock_in_items')
-            ->join('products', 'stock_in_items.product_id', '=', 'products.id')
-            ->join('stock_ins', 'stock_in_items.stock_in_id', '=', 'stock_ins.id')
-            ->whereBetween('stock_ins.date', [$dateFrom, $dateTo])
-            ->select(
-                'products.name',
-                'products.code',
-                DB::raw('SUM(stock_in_items.quantity) as total_qty'),
-                DB::raw('SUM(stock_in_items.subtotal) as total_amount')
-            )
-            ->groupBy('products.id', 'products.name', 'products.code')
-            ->orderByDesc('total_qty')
-            ->limit(10)
-            ->get();
-
-        // Top suppliers
-        $topSuppliers = DB::table('stock_ins')
-            ->join('suppliers', 'stock_ins.supplier_id', '=', 'suppliers.id')
-            ->whereBetween('stock_ins.date', [$dateFrom, $dateTo])
-            ->select(
-                'suppliers.name',
-                DB::raw('COUNT(stock_ins.id) as total_transactions'),
-                DB::raw('SUM(stock_ins.total) as total_amount')
-            )
-            ->groupBy('suppliers.id', 'suppliers.name')
-            ->orderByDesc('total_amount')
-            ->limit(10)
-            ->get();
+        $transactions = $query->orderBy('date', 'desc')->paginate(20);
+        $suppliers = \App\Models\Supplier::all();
 
         $summary = [
-            'total_purchases' => $totalPurchases,
-            'total_transactions' => $totalTransactions,
-            'avg_transaction' => $totalTransactions > 0 ? $totalPurchases / $totalTransactions : 0,
+            'total_transactions' => $query->count(),
+            'total_purchases' => $query->sum('total'),
+            'total_items' => $transactions->sum(function ($t) {
+                return $t->items->sum('quantity');
+            }),
         ];
 
-        return view('reports.purchases', compact('stockIns', 'suppliers', 'summary', 'mostPurchased', 'topSuppliers', 'dateFrom', 'dateTo'));
+        return view('reports.purchases', compact('transactions', 'summary', 'suppliers'));
+    }
+
+    public function purchasesPdf(Request $request)
+    {
+        $query = StockIn::with(['supplier', 'items.product']);
+
+        if ($request->filled('start_date')) {
+            $query->whereDate('date', '>=', $request->start_date);
+        }
+
+        if ($request->filled('end_date')) {
+            $query->whereDate('date', '<=', $request->end_date);
+        }
+
+        if ($request->filled('supplier')) {
+            $query->where('supplier_id', $request->supplier);
+        }
+
+        $transactions = $query->orderBy('date', 'desc')->get();
+
+        $dateRange = ($request->start_date && $request->end_date)
+            ? date('d M Y', strtotime($request->start_date)) . ' - ' . date('d M Y', strtotime($request->end_date))
+            : 'Semua';
+
+        $data = [
+            'transactions' => $transactions,
+            'title' => 'Laporan Pembelian',
+            'date' => date('d F Y'),
+            'date_range' => $dateRange,
+            'total_purchases' => $transactions->sum('total'),
+        ];
+
+        $pdf = Pdf::loadView('reports.pdf.purchases', $data);
+
+        return $pdf->download('laporan-pembelian-' . date('Y-m-d') . '.pdf');
+    }
+
+    public function emailPurchases(Request $request)
+    {
+        $request->validate([
+            'owner_email' => 'required|email',
+        ]);
+
+        try {
+            $query = StockIn::with(['supplier', 'items.product']);
+
+            if ($request->filled('start_date')) {
+                $query->whereDate('date', '>=', $request->start_date);
+            }
+
+            if ($request->filled('end_date')) {
+                $query->whereDate('date', '<=', $request->end_date);
+            }
+
+            if ($request->filled('supplier')) {
+                $query->where('supplier_id', $request->supplier);
+            }
+
+            $transactions = $query->orderBy('date', 'desc')->get();
+
+            $dateRange = ($request->start_date && $request->end_date)
+                ? date('d M Y', strtotime($request->start_date)) . ' - ' . date('d M Y', strtotime($request->end_date))
+                : 'Semua Periode';
+
+            $data = [
+                'transactions' => $transactions,
+                'title' => 'Laporan Pembelian',
+                'date' => date('d F Y'),
+                'date_range' => $dateRange,
+                'total_purchases' => $transactions->sum('total'),
+            ];
+
+            $pdf = Pdf::loadView('reports.pdf.purchases', $data);
+
+            $filename = 'laporan-pembelian-' . date('Y-m-d-His') . '.pdf';
+            $path = storage_path('app/temp/' . $filename);
+
+            if (!file_exists(storage_path('app/temp'))) {
+                mkdir(storage_path('app/temp'), 0755, true);
+            }
+
+            $pdf->save($path);
+
+            $reportData = [
+                'title' => 'Laporan Pembelian',
+                'type_label' => 'Laporan Pembelian',
+                'owner_name' => Setting::get('owner_name', 'Owner'),
+                'date_range' => $dateRange,
+                'total_items' => $transactions->count() . ' transaksi',
+                'grand_total' => 'Rp ' . number_format($data['total_purchases'], 0, ',', '.'),
+            ];
+
+            Mail::to($request->owner_email)
+                ->send(new ReportMail('purchases', $reportData, $path, $dateRange));
+
+            if (file_exists($path)) {
+                unlink($path);
+            }
+
+            return redirect()->back()->with('success', 'Laporan pembelian berhasil dikirim ke ' . $request->owner_email);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal mengirim email: ' . $e->getMessage());
+        }
     }
 
     public function profit(Request $request)
     {
-        $dateFrom = $request->date_from ?: now()->startOfMonth()->format('Y-m-d');
-        $dateTo = $request->date_to ?: now()->format('Y-m-d');
+        $startDate = $request->filled('start_date') ? $request->start_date : now()->subDays(30)->format('Y-m-d');
+        $endDate = $request->filled('end_date') ? $request->end_date : now()->format('Y-m-d');
 
-        // Get all sales in period
-        $stockOuts = StockOut::with(['items.product'])
-            ->whereBetween('date', [$dateFrom, $dateTo])
+        // Get sales data
+        $sales = StockOut::with(['items.product'])
+            ->whereDate('date', '>=', $startDate)
+            ->whereDate('date', '<=', $endDate)
             ->get();
 
-        // Calculate detailed profit
-        $profitData = [];
-        $totalRevenue = 0;
-        $totalCost = 0;
-        $totalProfit = 0;
+        // Get purchases data
+        $purchases = StockIn::with(['items.product'])
+            ->whereDate('date', '>=', $startDate)
+            ->whereDate('date', '<=', $endDate)
+            ->get();
 
-        foreach ($stockOuts as $stockOut) {
-            $revenue = 0;
-            $cost = 0;
+        // Calculate totals
+        $totalSales = $sales->sum('total');
+        $totalPurchases = $purchases->sum('total');
+        $grossProfit = $totalSales - $totalPurchases;
+        $profitMargin = $totalSales > 0 ? ($grossProfit / $totalSales) * 100 : 0;
 
-            foreach ($stockOut->items as $item) {
-                $itemRevenue = $item->quantity * $item->price;
-                $itemCost = $item->quantity * $item->product->purchase_price;
-
-                $revenue += $itemRevenue;
-                $cost += $itemCost;
+        // Product-wise profit
+        $productProfits = [];
+        foreach ($sales as $sale) {
+            foreach ($sale->items as $item) {
+                $productId = $item->product_id;
+                if (!isset($productProfits[$productId])) {
+                    $productProfits[$productId] = [
+                        'product' => $item->product,
+                        'quantity_sold' => 0,
+                        'revenue' => 0,
+                        'cost' => 0,
+                        'profit' => 0,
+                    ];
+                }
+                $productProfits[$productId]['quantity_sold'] += $item->quantity;
+                $productProfits[$productId]['revenue'] += $item->subtotal;
+                $productProfits[$productId]['cost'] += $item->quantity * $item->product->purchase_price;
+                $productProfits[$productId]['profit'] = $productProfits[$productId]['revenue'] - $productProfits[$productId]['cost'];
             }
-
-            $profit = $revenue - $cost;
-
-            $profitData[] = [
-                'date' => $stockOut->date,
-                'code' => $stockOut->code,
-                'customer' => $stockOut->customer_name ?: 'Umum',
-                'revenue' => $revenue,
-                'cost' => $cost,
-                'profit' => $profit,
-                'margin' => $cost > 0 ? ($profit / $cost) * 100 : 0,
-            ];
-
-            $totalRevenue += $revenue;
-            $totalCost += $cost;
-            $totalProfit += $profit;
         }
 
-        // Profit by category
-        $profitByCategory = DB::table('stock_out_items')
-            ->join('stock_outs', 'stock_out_items.stock_out_id', '=', 'stock_outs.id')
-            ->join('products', 'stock_out_items.product_id', '=', 'products.id')
-            ->join('categories', 'products.category_id', '=', 'categories.id')
-            ->whereBetween('stock_outs.date', [$dateFrom, $dateTo])
-            ->select(
-                'categories.name',
-                'categories.icon',
-                DB::raw('SUM(stock_out_items.subtotal) as revenue'),
-                DB::raw('SUM(stock_out_items.quantity * products.purchase_price) as cost')
-            )
-            ->groupBy('categories.id', 'categories.name', 'categories.icon')
-            ->get()
-            ->map(function($item) {
-                $item->profit = $item->revenue - $item->cost;
-                $item->margin = $item->cost > 0 ? ($item->profit / $item->cost) * 100 : 0;
-                return $item;
-            })
-            ->sortByDesc('profit');
+        // Sort by profit
+        usort($productProfits, function($a, $b) {
+            return $b['profit'] <=> $a['profit'];
+        });
 
         $summary = [
-            'total_revenue' => $totalRevenue,
-            'total_cost' => $totalCost,
-            'total_profit' => $totalProfit,
-            'avg_margin' => $totalCost > 0 ? ($totalProfit / $totalCost) * 100 : 0,
-            'total_transactions' => count($profitData),
+            'total_sales' => $totalSales,
+            'total_purchases' => $totalPurchases,
+            'gross_profit' => $grossProfit,
+            'profit_margin' => $profitMargin,
+            'start_date' => $startDate,
+            'end_date' => $endDate,
         ];
 
-        return view('reports.profit', compact('profitData', 'profitByCategory', 'summary', 'dateFrom', 'dateTo'));
+        return view('reports.profit', compact('summary', 'productProfits'));
+    }
+
+    public function profitPdf(Request $request)
+    {
+        $startDate = $request->filled('start_date') ? $request->start_date : now()->subDays(30)->format('Y-m-d');
+        $endDate = $request->filled('end_date') ? $request->end_date : now()->format('Y-m-d');
+
+        $sales = StockOut::with(['items.product'])
+            ->whereDate('date', '>=', $startDate)
+            ->whereDate('date', '<=', $endDate)
+            ->get();
+
+        $purchases = StockIn::with(['items.product'])
+            ->whereDate('date', '>=', $startDate)
+            ->whereDate('date', '<=', $endDate)
+            ->get();
+
+        $totalSales = $sales->sum('total');
+        $totalPurchases = $purchases->sum('total');
+        $grossProfit = $totalSales - $totalPurchases;
+        $profitMargin = $totalSales > 0 ? ($grossProfit / $totalSales) * 100 : 0;
+
+        $productProfits = [];
+        foreach ($sales as $sale) {
+            foreach ($sale->items as $item) {
+                $productId = $item->product_id;
+                if (!isset($productProfits[$productId])) {
+                    $productProfits[$productId] = [
+                        'product' => $item->product,
+                        'quantity_sold' => 0,
+                        'revenue' => 0,
+                        'cost' => 0,
+                        'profit' => 0,
+                    ];
+                }
+                $productProfits[$productId]['quantity_sold'] += $item->quantity;
+                $productProfits[$productId]['revenue'] += $item->subtotal;
+                $productProfits[$productId]['cost'] += $item->quantity * $item->product->purchase_price;
+                $productProfits[$productId]['profit'] = $productProfits[$productId]['revenue'] - $productProfits[$productId]['cost'];
+            }
+        }
+
+        usort($productProfits, function($a, $b) {
+            return $b['profit'] <=> $a['profit'];
+        });
+
+        $dateRange = date('d M Y', strtotime($startDate)) . ' - ' . date('d M Y', strtotime($endDate));
+
+        $data = [
+            'title' => 'Laporan Keuntungan',
+            'date' => date('d F Y'),
+            'date_range' => $dateRange,
+            'total_sales' => $totalSales,
+            'total_purchases' => $totalPurchases,
+            'gross_profit' => $grossProfit,
+            'profit_margin' => $profitMargin,
+            'product_profits' => $productProfits,
+        ];
+
+        $pdf = Pdf::loadView('reports.pdf.profit', $data);
+
+        return $pdf->download('laporan-keuntungan-' . date('Y-m-d') . '.pdf');
+    }
+
+    public function emailProfit(Request $request)
+    {
+        $request->validate([
+            'owner_email' => 'required|email',
+        ]);
+
+        try {
+            $startDate = $request->filled('start_date') ? $request->start_date : now()->subDays(30)->format('Y-m-d');
+            $endDate = $request->filled('end_date') ? $request->end_date : now()->format('Y-m-d');
+
+            $sales = StockOut::with(['items.product'])
+                ->whereDate('date', '>=', $startDate)
+                ->whereDate('date', '<=', $endDate)
+                ->get();
+
+            $purchases = StockIn::with(['items.product'])
+                ->whereDate('date', '>=', $startDate)
+                ->whereDate('date', '<=', $endDate)
+                ->get();
+
+            $totalSales = $sales->sum('total');
+            $totalPurchases = $purchases->sum('total');
+            $grossProfit = $totalSales - $totalPurchases;
+            $profitMargin = $totalSales > 0 ? ($grossProfit / $totalSales) * 100 : 0;
+
+            $productProfits = [];
+            foreach ($sales as $sale) {
+                foreach ($sale->items as $item) {
+                    $productId = $item->product_id;
+                    if (!isset($productProfits[$productId])) {
+                        $productProfits[$productId] = [
+                            'product' => $item->product,
+                            'quantity_sold' => 0,
+                            'revenue' => 0,
+                            'cost' => 0,
+                            'profit' => 0,
+                        ];
+                    }
+                    $productProfits[$productId]['quantity_sold'] += $item->quantity;
+                    $productProfits[$productId]['revenue'] += $item->subtotal;
+                    $productProfits[$productId]['cost'] += $item->quantity * $item->product->purchase_price;
+                    $productProfits[$productId]['profit'] = $productProfits[$productId]['revenue'] - $productProfits[$productId]['cost'];
+                }
+            }
+
+            usort($productProfits, function($a, $b) {
+                return $b['profit'] <=> $a['profit'];
+            });
+
+            $dateRange = date('d M Y', strtotime($startDate)) . ' - ' . date('d M Y', strtotime($endDate));
+
+            $data = [
+                'title' => 'Laporan Keuntungan',
+                'date' => date('d F Y'),
+                'date_range' => $dateRange,
+                'total_sales' => $totalSales,
+                'total_purchases' => $totalPurchases,
+                'gross_profit' => $grossProfit,
+                'profit_margin' => $profitMargin,
+                'product_profits' => $productProfits,
+            ];
+
+            $pdf = Pdf::loadView('reports.pdf.profit', $data);
+
+            $filename = 'laporan-keuntungan-' . date('Y-m-d-His') . '.pdf';
+            $path = storage_path('app/temp/' . $filename);
+
+            if (!file_exists(storage_path('app/temp'))) {
+                mkdir(storage_path('app/temp'), 0755, true);
+            }
+
+            $pdf->save($path);
+
+            $reportData = [
+                'title' => 'Laporan Keuntungan',
+                'type_label' => 'Laporan Profit/Keuntungan',
+                'owner_name' => Setting::get('owner_name', 'Owner'),
+                'date_range' => $dateRange,
+                'total_items' => count($productProfits) . ' produk',
+                'grand_total' => 'Rp ' . number_format($grossProfit, 0, ',', '.') . ' (' . number_format($profitMargin, 2) . '%)',
+            ];
+
+            Mail::to($request->owner_email)
+                ->send(new ReportMail('profit', $reportData, $path, $dateRange));
+
+            if (file_exists($path)) {
+                unlink($path);
+            }
+
+            return redirect()->back()->with('success', 'Laporan keuntungan berhasil dikirim ke ' . $request->owner_email);
+
+        } catch (\Exception $e) {
+            return redirect()->back()->with('error', 'Gagal mengirim email: ' . $e->getMessage());
+        }
     }
 }

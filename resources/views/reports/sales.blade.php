@@ -1,254 +1,186 @@
 <x-app-layout>
     <x-slot name="header">
-        <div class="flex items-center justify-between">
+        <div class="flex justify-between items-center">
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-                {{ __('Laporan Penjualan') }}
+                📤 Laporan Penjualan
             </h2>
-            <a href="{{ route('reports.index') }}"
-                class="inline-flex items-center px-4 py-2 bg-gray-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-gray-700">
-                ← Kembali
+            <a href="{{ route('reports.index') }}" class="text-indigo-600 hover:text-indigo-900">
+                ← Kembali ke Menu Laporan
             </a>
         </div>
     </x-slot>
 
     <div class="py-12">
         <div class="max-w-7xl mx-auto sm:px-6 lg:px-8">
+            <!-- Alert -->
+            @if(session('success'))
+            <div class="mb-4 bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg">
+                ✅ {{ session('success') }}
+            </div>
+            @endif
+
+            @if(session('error'))
+            <div class="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+                ❌ {{ session('error') }}
+            </div>
+            @endif
+
             <!-- Summary Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <p class="text-sm text-gray-600">Total Penjualan</p>
-                        <p class="text-xl font-bold text-green-600 mt-1">Rp {{ number_format($summary['total_sales'], 0, ',', '.') }}</p>
-                    </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-lg shadow-lg p-6 text-white">
+                    <p class="text-blue-100 text-sm">Total Transaksi</p>
+                    <p class="text-3xl font-bold mt-1">{{ $summary['total_transactions'] }}</p>
                 </div>
 
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <p class="text-sm text-gray-600">Total Transaksi</p>
-                        <p class="text-2xl font-bold text-gray-900 mt-1">{{ $summary['total_transactions'] }}</p>
-                    </div>
+                <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-lg shadow-lg p-6 text-white">
+                    <p class="text-green-100 text-sm">Total Penjualan</p>
+                    <p class="text-3xl font-bold mt-1">Rp {{ number_format($summary['total_sales'], 0, ',', '.') }}</p>
                 </div>
 
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <p class="text-sm text-gray-600">Modal</p>
-                        <p class="text-xl font-bold text-blue-600 mt-1">Rp {{ number_format($summary['total_modal'], 0, ',', '.') }}</p>
-                    </div>
+                <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-lg shadow-lg p-6 text-white">
+                    <p class="text-purple-100 text-sm">Total Item Terjual</p>
+                    <p class="text-3xl font-bold mt-1">{{ $summary['total_items'] }}</p>
                 </div>
+            </div>
 
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <p class="text-sm text-gray-600">Profit</p>
-                        <p class="text-xl font-bold text-green-600 mt-1">Rp {{ number_format($summary['total_profit'], 0, ',', '.') }}</p>
-                    </div>
-                </div>
+            <!-- Actions -->
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-4">
+                <div class="p-6">
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-semibold">Export Laporan</h3>
+                        <div class="flex gap-2">
+                            <form action="{{ route('reports.sales.pdf') }}" method="GET" class="inline">
+                                @foreach(request()->all() as $key => $value)
+                                    <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                                @endforeach
+                                <button type="submit" class="bg-red-500 text-white px-4 py-2 rounded-lg hover:bg-red-600 transition inline-flex items-center gap-2">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                                    </svg>
+                                    Download PDF
+                                </button>
+                            </form>
 
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <p class="text-sm text-gray-600">Rata-rata/Transaksi</p>
-                        <p class="text-xl font-bold text-purple-600 mt-1">Rp {{ number_format($summary['avg_transaction'], 0, ',', '.') }}</p>
+                            @can('email_reports')
+                            <button onclick="toggleEmailModal()" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition inline-flex items-center gap-2">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                </svg>
+                                Kirim ke Email
+                            </button>
+                            @endcan
+                        </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Filter -->
-            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-6">
-                <div class="p-6">
-                    <form method="GET" action="{{ route('reports.sales') }}" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Dari Tanggal</label>
-                            <input type="date" name="date_from" value="{{ $dateFrom }}"
-                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+            <!-- Email Modal -->
+            <div id="emailModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden overflow-y-auto h-full w-full z-50">
+                <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">📧 Kirim Laporan Penjualan</h3>
+
+                    <form action="{{ route('reports.sales.email') }}" method="POST">
+                        @csrf
+                        @foreach(request()->all() as $key => $value)
+                            <input type="hidden" name="{{ $key }}" value="{{ $value }}">
+                        @endforeach
+
+                        <div class="mb-4">
+                            <label class="block text-gray-700 text-sm font-bold mb-2">Email Owner</label>
+                            <input type="email" name="owner_email" value="{{ App\Models\Setting::get('owner_email', 'owner@example.com') }}" required
+                                class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 focus:outline-none focus:shadow-outline">
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Sampai Tanggal</label>
-                            <input type="date" name="date_to" value="{{ $dateTo }}"
-                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+                            <p class="text-sm text-blue-800">
+                                <strong>📋 Yang akan dikirim:</strong><br>
+                                • Laporan Penjualan (PDF)<br>
+                                • {{ $summary['total_transactions'] }} transaksi<br>
+                                • Total: Rp {{ number_format($summary['total_sales'], 0, ',', '.') }}
+                            </p>
                         </div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Cari</label>
-                            <input type="text" name="search" value="{{ request('search') }}" placeholder="Kode/Customer..."
-                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                        </div>
-                        <div class="flex items-end gap-2">
-                            <button type="submit"
-                                class="flex-1 inline-flex justify-center items-center px-4 py-2 bg-indigo-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-indigo-700">
-                                Filter
-                            </button>
-                            <a href="{{ route('reports.sales') }}"
-                                class="inline-flex items-center px-4 py-2 bg-gray-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-gray-700">
-                                Reset
-                            </a>
+
+                        <div class="flex gap-2">
+                            <button type="submit" class="flex-1 bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600">Kirim</button>
+                            <button type="button" onclick="toggleEmailModal()" class="flex-1 bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400">Batal</button>
                         </div>
                     </form>
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-                <!-- Best Selling Products -->
-                <div class="lg:col-span-2 bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Produk Terlaris</h3>
-                        <div class="overflow-x-auto">
-                            <table class="min-w-full divide-y divide-gray-200">
-                                <thead class="bg-gray-50">
-                                    <tr>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                                        <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Produk</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Terjual</th>
-                                        <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Nilai</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="bg-white divide-y divide-gray-200">
-                                    @forelse($bestSelling as $index => $item)
-                                        <tr class="hover:bg-gray-50">
-                                            <td class="px-4 py-3 text-sm text-gray-500">{{ $index + 1 }}</td>
-                                            <td class="px-4 py-3">
-                                                <div class="text-sm font-medium text-gray-900">{{ $item->name }}</div>
-                                                <div class="text-xs text-gray-500">{{ $item->code }}</div>
-                                            </td>
-                                            <td class="px-4 py-3 text-right text-sm font-semibold text-gray-900">{{ number_format($item->total_qty, 0) }}</td>
-                                            <td class="px-4 py-3 text-right text-sm font-semibold text-green-600">
-                                                Rp {{ number_format($item->total_amount, 0, ',', '.') }}
-                                            </td>
-                                        </tr>
-                                    @empty
-                                        <tr>
-                                            <td colspan="4" class="px-4 py-8 text-center text-sm text-gray-500">
-                                                Tidak ada data penjualan
-                                            </td>
-                                        </tr>
-                                    @endforelse
-                                </tbody>
-                            </table>
+            <!-- Filter -->
+            <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-4">
+                <div class="p-6">
+                    <form method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Tanggal Mulai</label>
+                            <input type="date" name="start_date" value="{{ request('start_date') }}"
+                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                         </div>
-                    </div>
-                </div>
 
-                <!-- Period Summary -->
-                <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
-                    <div class="p-6">
-                        <h3 class="text-lg font-semibold text-gray-900 mb-4">Ringkasan Periode</h3>
-                        <div class="space-y-4">
-                            <div class="bg-gray-50 rounded-lg p-4">
-                                <p class="text-xs text-gray-600 mb-1">Periode</p>
-                                <p class="text-sm font-semibold text-gray-900">
-                                    {{ \Carbon\Carbon::parse($dateFrom)->format('d M Y') }} -
-                                    {{ \Carbon\Carbon::parse($dateTo)->format('d M Y') }}
-                                </p>
-                            </div>
-
-                            <div class="border-t border-gray-200 pt-4">
-                                <div class="flex justify-between items-center mb-2">
-                                    <span class="text-sm text-gray-600">Total Penjualan:</span>
-                                    <span class="text-sm font-semibold text-green-600">
-                                        Rp {{ number_format($summary['total_sales'], 0, ',', '.') }}
-                                    </span>
-                                </div>
-                                <div class="flex justify-between items-center mb-2">
-                                    <span class="text-sm text-gray-600">Total Modal:</span>
-                                    <span class="text-sm font-semibold text-blue-600">
-                                        Rp {{ number_format($summary['total_modal'], 0, ',', '.') }}
-                                    </span>
-                                </div>
-                                <div class="flex justify-between items-center pt-2 border-t border-gray-200">
-                                    <span class="text-sm font-bold text-gray-900">Profit:</span>
-                                    <span class="text-sm font-bold text-green-600">
-                                        Rp {{ number_format($summary['total_profit'], 0, ',', '.') }}
-                                    </span>
-                                </div>
-                            </div>
-
-                            <div class="bg-green-50 rounded-lg p-4">
-                                <p class="text-xs text-gray-600 mb-1">Margin Keuntungan</p>
-                                <p class="text-2xl font-bold text-green-600">
-                                    {{ $summary['total_modal'] > 0 ? number_format(($summary['total_profit'] / $summary['total_modal']) * 100, 1) : 0 }}%
-                                </p>
-                            </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">Tanggal Akhir</label>
+                            <input type="date" name="end_date" value="{{ request('end_date') }}"
+                                class="block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                         </div>
-                    </div>
+
+                        <div class="md:col-span-2 flex items-end gap-2">
+                            <button type="submit" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">🔍 Filter</button>
+                            <a href="{{ route('reports.sales') }}" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300">Reset</a>
+                        </div>
+                    </form>
                 </div>
             </div>
 
-            <!-- Transactions List -->
+            <!-- Table -->
             <div class="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                 <div class="p-6">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-lg font-semibold text-gray-900">Daftar Transaksi Penjualan</h3>
-                        <button onclick="window.print()"
-                            class="inline-flex items-center px-4 py-2 bg-blue-600 border border-transparent rounded-md font-semibold text-xs text-white uppercase tracking-widest hover:bg-blue-700">
-                            🖨️ Print
-                        </button>
-                    </div>
-
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tanggal</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kode</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Items</th>
-                                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Kode</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tanggal</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Items</th>
+                                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total</th>
+                                    <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Aksi</th>
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-gray-200">
-                                @forelse($stockOuts as $stockOut)
-                                    <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                            {{ \Carbon\Carbon::parse($stockOut->date)->format('d M Y') }}
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap">
-                                            <a href="{{ route('stock-outs.show', $stockOut) }}" class="text-sm font-medium text-blue-600 hover:text-blue-800">
-                                                {{ $stockOut->code }}
-                                            </a>
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                            {{ $stockOut->customer_name ?: 'Umum' }}
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap text-right text-sm text-gray-500">
-                                            {{ $stockOut->items->count() }} item
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap text-right text-sm font-semibold text-green-600">
-                                            Rp {{ number_format($stockOut->total, 0, ',', '.') }}
-                                        </td>
-                                        <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
-                                            {{ $stockOut->user->name }}
-                                        </td>
-                                    </tr>
+                                @forelse($transactions as $trans)
+                                <tr class="hover:bg-gray-50">
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">{{ $trans->code }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">{{ $trans->date->format('d M Y') }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm">{{ $trans->customer_name ?: '-' }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-center">{{ $trans->items->count() }} item</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-green-600">
+                                        Rp {{ number_format($trans->total, 0, ',', '.') }}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-sm text-center">
+                                        <a href="{{ route('stock-outs.show', $trans) }}" class="text-indigo-600 hover:text-indigo-900">Detail</a>
+                                    </td>
+                                </tr>
                                 @empty
-                                    <tr>
-                                        <td colspan="6" class="px-4 py-8 text-center text-sm text-gray-500">
-                                            Tidak ada transaksi penjualan pada periode ini
-                                        </td>
-                                    </tr>
+                                <tr>
+                                    <td colspan="6" class="px-6 py-4 text-center text-gray-500">Tidak ada data</td>
+                                </tr>
                                 @endforelse
                             </tbody>
-                            @if($stockOuts->isNotEmpty())
-                                <tfoot class="bg-gray-50 font-semibold">
-                                    <tr>
-                                        <td colspan="4" class="px-4 py-3 text-right text-sm text-gray-900">TOTAL:</td>
-                                        <td class="px-4 py-3 text-right text-sm text-green-600">
-                                            Rp {{ number_format($stockOuts->sum('total'), 0, ',', '.') }}
-                                        </td>
-                                        <td></td>
-                                    </tr>
-                                </tfoot>
-                            @endif
                         </table>
+                    </div>
+
+                    <div class="mt-4">
+                        {{ $transactions->links() }}
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    @push('styles')
-    <style>
-        @media print {
-            .no-print { display: none !important; }
-            header, nav, button, a { display: none !important; }
+    <script>
+        function toggleEmailModal() {
+            document.getElementById('emailModal').classList.toggle('hidden');
         }
-    </style>
-    @endpush
+    </script>
 </x-app-layout>

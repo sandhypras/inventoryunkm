@@ -1,124 +1,134 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
+    <meta charset="UTF-8">
     <title>{{ $title }}</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; font-size: 11px; padding: 20px; }
-        .header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #333; padding-bottom: 10px; }
-        .header h1 { font-size: 20px; margin-bottom: 5px; }
-        .header p { font-size: 11px; color: #666; }
-        .summary { background: #f5f5f5; padding: 15px; margin-bottom: 20px; border-radius: 5px; }
-        .summary table { width: 100%; }
-        .summary td { padding: 5px; font-size: 11px; }
-        .summary .label { font-weight: bold; width: 120px; }
+        @page { margin: 20mm; }
+        body { font-family: Arial, sans-serif; font-size: 10pt; line-height: 1.4; }
+        .header { text-align: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 3px solid #8b5cf6; }
+        .header h1 { margin: 0; color: #8b5cf6; font-size: 20pt; }
+        .header p { margin: 5px 0; color: #666; }
+        .summary-box { background: #f8f9fa; padding: 15px; margin-bottom: 15px; border-radius: 5px; }
+        .summary-grid { display: table; width: 100%; }
+        .summary-item { display: table-cell; padding: 10px; text-align: center; border-right: 1px solid #ddd; }
+        .summary-item:last-child { border-right: none; }
+        .summary-label { font-size: 8pt; color: #666; margin-bottom: 5px; }
+        .summary-value { font-size: 14pt; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-        th { background: #333; color: white; padding: 6px; text-align: left; font-size: 10px; }
-        td { padding: 5px; border-bottom: 1px solid #ddd; font-size: 10px; }
+        th { background: #8b5cf6; color: white; padding: 8px 5px; text-align: left; font-size: 9pt; border: 1px solid #8b5cf6; }
+        td { padding: 6px 5px; border: 1px solid #ddd; font-size: 9pt; }
+        tr:nth-child(even) { background: #f8f9fa; }
         .text-right { text-align: right; }
         .text-center { text-align: center; }
-        tfoot { font-weight: bold; background: #f5f5f5; }
-        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ddd; text-align: center; font-size: 10px; color: #666; }
-        .profit-positive { color: green; }
-        .profit-negative { color: red; }
+        .total-row { font-weight: bold; background: #e9ecef !important; }
+        .profit-positive { color: #10b981; font-weight: bold; }
+        .profit-negative { color: #ef4444; font-weight: bold; }
+        .margin-badge { padding: 2px 6px; border-radius: 3px; font-size: 8pt; }
+        .margin-high { background: #d1fae5; color: #065f46; }
+        .margin-medium { background: #fef3c7; color: #92400e; }
+        .margin-low { background: #fee2e2; color: #991b1b; }
+        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #ddd; text-align: center; font-size: 8pt; color: #666; }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>{{ $title }}</h1>
-        <p>Periode: {{ $dateRange }}</p>
-        <p>Tanggal Cetak: {{ $date }}</p>
+        <p>{{ config('app.name', 'Inventory UMKM') }}</p>
+        <p>Tanggal Cetak: {{ $date }} | Periode: {{ $date_range }}</p>
     </div>
 
-    <div class="summary">
-        <table>
-            <tr>
-                <td class="label">Total Pendapatan:</td>
-                <td>Rp {{ number_format($totalRevenue, 0, ',', '.') }}</td>
-                <td class="label">Total Profit:</td>
-                <td><strong class="profit-positive">Rp {{ number_format($totalProfit, 0, ',', '.') }}</strong></td>
-            </tr>
-            <tr>
-                <td class="label">Total Modal:</td>
-                <td>Rp {{ number_format($totalCost, 0, ',', '.') }}</td>
-                <td class="label">Rata-rata Margin:</td>
-                <td><strong>{{ number_format($avgMargin, 1) }}%</strong></td>
-            </tr>
-            <tr>
-                <td class="label">Total Transaksi:</td>
-                <td colspan="3">{{ count($profitData) }} transaksi</td>
-            </tr>
-        </table>
+    <div class="summary-box">
+        <div class="summary-grid">
+            <div class="summary-item">
+                <div class="summary-label">Total Penjualan</div>
+                <div class="summary-value" style="color: #10b981;">Rp {{ number_format($total_sales, 0, ',', '.') }}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Total Pembelian</div>
+                <div class="summary-value" style="color: #f97316;">Rp {{ number_format($total_purchases, 0, ',', '.') }}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Keuntungan Bersih</div>
+                <div class="summary-value" style="color: #3b82f6;">Rp {{ number_format($gross_profit, 0, ',', '.') }}</div>
+            </div>
+            <div class="summary-item">
+                <div class="summary-label">Margin</div>
+                <div class="summary-value" style="color: #8b5cf6;">{{ number_format($profit_margin, 2) }}%</div>
+            </div>
+        </div>
     </div>
 
-    <h3 style="margin-bottom: 10px; font-size: 14px;">Detail Profit per Transaksi</h3>
+    <h3 style="margin-top: 20px; color: #374151;">Keuntungan per Produk</h3>
+
     <table>
         <thead>
             <tr>
-                <th style="width: 5%;" class="text-center">#</th>
-                <th style="width: 10%;">Tanggal</th>
-                <th style="width: 15%;">Kode</th>
-                <th style="width: 15%;">Customer</th>
-                <th style="width: 14%;" class="text-right">Pendapatan</th>
-                <th style="width: 13%;" class="text-right">Modal</th>
-                <th style="width: 14%;" class="text-right">Profit</th>
-                <th style="width: 14%;" class="text-right">Margin</th>
+                <th width="5%">No</th>
+                <th width="25%">Produk</th>
+                <th width="10%" class="text-center">Qty</th>
+                <th width="17%" class="text-right">Revenue</th>
+                <th width="17%" class="text-right">Modal</th>
+                <th width="17%" class="text-right">Profit</th>
+                <th width="9%" class="text-center">Margin</th>
             </tr>
         </thead>
         <tbody>
-            @foreach($profitData as $index => $data)
-                <tr>
-                    <td class="text-center">{{ $index + 1 }}</td>
-                    <td>{{ date('d/m/Y', strtotime($data['date'])) }}</td>
-                    <td>{{ $data['code'] }}</td>
-                    <td>{{ $data['customer'] }}</td>
-                    <td class="text-right">Rp {{ number_format($data['revenue'], 0, ',', '.') }}</td>
-                    <td class="text-right">Rp {{ number_format($data['cost'], 0, ',', '.') }}</td>
-                    <td class="text-right {{ $data['profit'] > 0 ? 'profit-positive' : 'profit-negative' }}">
-                        Rp {{ number_format($data['profit'], 0, ',', '.') }}
-                    </td>
-                    <td class="text-right">{{ number_format($data['margin'], 1) }}%</td>
-                </tr>
-            @endforeach
-        </tbody>
-        <tfoot>
+            @php $no = 1; @endphp
+            @forelse($product_profits as $item)
+            @php
+                $margin = $item['revenue'] > 0 ? ($item['profit'] / $item['revenue']) * 100 : 0;
+                $marginClass = $margin > 30 ? 'margin-high' : ($margin > 15 ? 'margin-medium' : 'margin-low');
+            @endphp
             <tr>
-                <td colspan="4" class="text-right">TOTAL:</td>
-                <td class="text-right">Rp {{ number_format($totalRevenue, 0, ',', '.') }}</td>
-                <td class="text-right">Rp {{ number_format($totalCost, 0, ',', '.') }}</td>
-                <td class="text-right profit-positive">Rp {{ number_format($totalProfit, 0, ',', '.') }}</td>
-                <td class="text-right">{{ number_format($avgMargin, 1) }}%</td>
+                <td class="text-center">{{ $no++ }}</td>
+                <td>
+                    <strong>{{ $item['product']->name }}</strong><br>
+                    <small style="color: #6b7280;">{{ $item['product']->category->name ?? '-' }}</small>
+                </td>
+                <td class="text-center">{{ $item['quantity_sold'] }}</td>
+                <td class="text-right">{{ number_format($item['revenue'], 0, ',', '.') }}</td>
+                <td class="text-right">{{ number_format($item['cost'], 0, ',', '.') }}</td>
+                <td class="text-right {{ $item['profit'] > 0 ? 'profit-positive' : 'profit-negative' }}">
+                    {{ number_format($item['profit'], 0, ',', '.') }}
+                </td>
+                <td class="text-center">
+                    <span class="margin-badge {{ $marginClass }}">{{ number_format($margin, 1) }}%</span>
+                </td>
             </tr>
-        </tfoot>
+            @empty
+            <tr>
+                <td colspan="7" class="text-center">Tidak ada data penjualan dalam periode ini</td>
+            </tr>
+            @endforelse
+
+            @if(count($product_profits) > 0)
+            <tr class="total-row">
+                <td colspan="3" class="text-right">TOTAL</td>
+                <td class="text-right">Rp {{ number_format($total_sales, 0, ',', '.') }}</td>
+                <td class="text-right">Rp {{ number_format($total_purchases, 0, ',', '.') }}</td>
+                <td class="text-right profit-positive">Rp {{ number_format($gross_profit, 0, ',', '.') }}</td>
+                <td class="text-center">
+                    <span class="margin-badge {{ $profit_margin > 30 ? 'margin-high' : ($profit_margin > 15 ? 'margin-medium' : 'margin-low') }}">
+                        {{ number_format($profit_margin, 1) }}%
+                    </span>
+                </td>
+            </tr>
+            @endif
+        </tbody>
     </table>
 
-    <!-- Summary Insights -->
-    <div style="margin-top: 30px; background: #e8f5e9; padding: 15px; border-radius: 5px;">
-        <h3 style="margin-bottom: 10px; font-size: 14px; color: green;">📊 Ringkasan Analisis</h3>
-        <table style="width: 100%;">
-            <tr>
-                <td style="padding: 5px;"><strong>✓ Total Transaksi:</strong></td>
-                <td style="padding: 5px;">{{ count($profitData) }} transaksi berhasil</td>
-            </tr>
-            <tr>
-                <td style="padding: 5px;"><strong>✓ Margin Tertinggi:</strong></td>
-                <td style="padding: 5px;">{{ count($profitData) > 0 ? number_format(max(array_column($profitData, 'margin')), 1) : 0 }}%</td>
-            </tr>
-            <tr>
-                <td style="padding: 5px;"><strong>✓ Margin Terendah:</strong></td>
-                <td style="padding: 5px;">{{ count($profitData) > 0 ? number_format(min(array_column($profitData, 'margin')), 1) : 0 }}%</td>
-            </tr>
-            <tr>
-                <td style="padding: 5px;"><strong>✓ Profit per Transaksi:</strong></td>
-                <td style="padding: 5px;">Rp {{ number_format(count($profitData) > 0 ? $totalProfit / count($profitData) : 0, 0, ',', '.') }}</td>
-            </tr>
-        </table>
+    <div style="margin-top: 20px; padding: 10px; background: #eff6ff; border-left: 4px solid #3b82f6;">
+        <p style="margin: 0; font-size: 9pt; color: #1e40af;">
+            <strong>💡 Catatan:</strong>
+            Margin Keuntungan = (Profit / Revenue) × 100%.
+            Margin > 30% = Sangat Baik, 15-30% = Cukup Baik, < 15% = Perlu Ditingkatkan.
+        </p>
     </div>
 
     <div class="footer">
-        <p>Dicetak pada {{ date('d F Y H:i:s') }} | Sistem Inventory UMKM</p>
-        <p style="margin-top: 5px; font-style: italic;">Laporan ini dibuat secara otomatis oleh sistem</p>
+        <p>Laporan ini dibuat secara otomatis oleh sistem pada {{ date('d F Y H:i') }}</p>
+        <p>&copy; {{ date('Y') }} {{ config('app.name') }}. All rights reserved.</p>
     </div>
 </body>
 </html>

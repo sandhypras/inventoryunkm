@@ -16,17 +16,15 @@ class ReportMail extends Mailable
     public $reportType;
     public $reportData;
     public $pdfPath;
-    public $dateRange;
 
     /**
      * Create a new message instance.
      */
-    public function __construct($reportType, $reportData, $pdfPath, $dateRange = null)
+    public function __construct($reportType, $reportData, $pdfPath = null)
     {
         $this->reportType = $reportType;
         $this->reportData = $reportData;
         $this->pdfPath = $pdfPath;
-        $this->dateRange = $dateRange;
     }
 
     /**
@@ -34,23 +32,15 @@ class ReportMail extends Mailable
      */
     public function envelope(): Envelope
     {
-        $reportTitles = [
-            'stock' => 'Laporan Stok',
+        $subjects = [
+            'stock' => 'Laporan Stok Barang',
             'sales' => 'Laporan Penjualan',
             'purchases' => 'Laporan Pembelian',
-            'profit' => 'Laporan Keuntungan',
+            'profit' => 'Laporan Profit & Margin',
         ];
 
-        $subject = $reportTitles[$this->reportType] ?? 'Laporan';
-
-        if ($this->dateRange) {
-            $subject .= " - {$this->dateRange}";
-        } else {
-            $subject .= " - " . date('d F Y');
-        }
-
         return new Envelope(
-            subject: $subject,
+            subject: $subjects[$this->reportType] ?? 'Laporan Sistem Inventory',
         );
     }
 
@@ -69,10 +59,14 @@ class ReportMail extends Mailable
      */
     public function attachments(): array
     {
-        return [
-            Attachment::fromPath($this->pdfPath)
-                ->as('laporan.pdf')
-                ->withMime('application/pdf'),
-        ];
+        if ($this->pdfPath && file_exists($this->pdfPath)) {
+            return [
+                Attachment::fromPath($this->pdfPath)
+                    ->as('laporan-' . $this->reportType . '-' . date('Y-m-d') . '.pdf')
+                    ->withMime('application/pdf'),
+            ];
+        }
+
+        return [];
     }
 }
